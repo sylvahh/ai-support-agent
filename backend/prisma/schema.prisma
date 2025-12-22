@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ConversationStatus {
+  open
+  closed
+}
+
+enum MessageSender {
+  user
+  ai
+}
+
+model Conversation {
+  id             String             @id @default(uuid())
+  status         ConversationStatus @default(open)
+  lastActivityAt DateTime           @default(now()) @map("last_activity_at")
+  closedAt       DateTime?          @map("closed_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String        @id @default(uuid())
+  conversationId String        @map("conversation_id")
+  sender         MessageSender
+  text           String
+  isRead         Boolean       @default(false) @map("is_read")
+  readAt         DateTime?     @map("read_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments  Attachment[]
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+model Attachment {
+  id                 String   @id @default(uuid())
+  messageId          String   @map("message_id")
+  fileName           String   @map("file_name")
+  fileType           String   @map("file_type")
+  fileUrl            String   @map("file_url")
+  cloudinaryPublicId String?  @map("cloudinary_public_id")
+  fileSize           Int?     @map("file_size")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("attachments")
+}
