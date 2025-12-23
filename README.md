@@ -4,8 +4,8 @@ A mini AI support agent for a live chat widget built for the Spur Founding Full-
 
 ## Live Demo
 
-- **Frontend**: [Your Vercel URL]
-- **Backend**: [Your Render URL]
+- **Frontend**: [https://ai-support-agent-steel.vercel.app](https://ai-support-agent-steel.vercel.app)
+- **Backend**: [https://ai-support-agent-54el.onrender.com](https://ai-support-agent-54el.onrender.com)
 
 ## Features
 
