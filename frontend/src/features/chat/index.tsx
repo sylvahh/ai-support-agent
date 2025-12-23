@@ -213,17 +213,6 @@ export function Chat({ onClose }: ChatProps) {
     }
   };
 
-  // Start new conversation
-  const handleNewConversation = () => {
-    localStorage.removeItem(variables.STORAGE_KEYS.sessionId);
-    setSessionId(null);
-    setMessages([]);
-    setStatus("open");
-    setError(null);
-    setWarningShown(false);
-    lastMessageCountRef.current = 0;
-  };
-
   return (
     <div className="flex flex-col h-[480px] w-[360px] bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
       <ChatHeader status={status} onClose={onClose} />

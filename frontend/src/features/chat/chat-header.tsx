@@ -1,4 +1,4 @@
-import { Bot, X, Minus } from "lucide-react";
+import { Bot, Minus } from "lucide-react";
 import type { ConversationStatus } from "@/types/chat.types";
 
 interface ChatHeaderProps {
