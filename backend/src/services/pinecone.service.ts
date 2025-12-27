@@ -102,12 +102,28 @@ export async function searchVectors(
 export async function deleteVectorsByDocumentId(documentId: string): Promise<void> {
   try {
     const index = getIndex();
-    await index.deleteMany({
+
+    // For serverless indexes, we need to delete by vector IDs
+    // First, query to find all vectors with this documentId
+    // We'll use a dummy vector to search and filter by metadata
+    const dummyVector = new Array(1024).fill(0);
+
+    const searchResponse = await index.query({
+      vector: dummyVector,
+      topK: 10000, // Get all matching vectors
+      includeMetadata: true,
       filter: {
         documentId: { $eq: documentId },
       },
     });
-    console.log(`Deleted vectors for document ${documentId}`);
+
+    if (searchResponse.matches && searchResponse.matches.length > 0) {
+      const vectorIds = searchResponse.matches.map(match => match.id);
+      await index.deleteMany(vectorIds);
+      console.log(`Deleted ${vectorIds.length} vectors for document ${documentId}`);
+    } else {
+      console.log(`No vectors found for document ${documentId}`);
+    }
   } catch (error) {
     console.error('Error deleting vectors:', error);
     throw new Error('Failed to delete vectors from Pinecone');

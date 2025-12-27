@@ -22,6 +22,35 @@ interface ChunkData {
 const TARGET_CHUNK_SIZE = 512;
 const OVERLAP_SIZE = 50;
 
+// Helper to check if error is a database connection issue
+function isDatabaseConnectionError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    return (
+      message.includes("can't reach database server") ||
+      message.includes('connection refused') ||
+      message.includes('connection timed out') ||
+      message.includes('econnrefused') ||
+      message.includes('etimedout') ||
+      message.includes('enotfound')
+    );
+  }
+  return false;
+}
+
+// Custom error class for user-friendly errors
+export class ServiceError extends Error {
+  public readonly userMessage: string;
+  public readonly isRetryable: boolean;
+
+  constructor(message: string, userMessage: string, isRetryable = false) {
+    super(message);
+    this.name = 'ServiceError';
+    this.userMessage = userMessage;
+    this.isRetryable = isRetryable;
+  }
+}
+
 // Extract text from file based on type
 async function extractText(buffer: Buffer, mimetype: string): Promise<string> {
   try {
@@ -160,7 +189,29 @@ export async function uploadDocument(input: UploadDocumentInput) {
     };
   } catch (error) {
     console.error('Error uploading document:', error);
-    throw error;
+
+    // Provide user-friendly error messages
+    if (isDatabaseConnectionError(error)) {
+      throw new ServiceError(
+        error instanceof Error ? error.message : 'Database connection failed',
+        'Unable to connect to the database. Please try again in a few seconds.',
+        true
+      );
+    }
+
+    if (error instanceof Error && error.message.includes('No text content')) {
+      throw new ServiceError(error.message, 'The document appears to be empty or unreadable.', false);
+    }
+
+    if (error instanceof Error && error.message.includes('Failed to extract text')) {
+      throw new ServiceError(error.message, 'Could not read the document. Please ensure it\'s a valid PDF or text file.', false);
+    }
+
+    throw new ServiceError(
+      error instanceof Error ? error.message : 'Unknown error',
+      'An unexpected error occurred while uploading the document. Please try again.',
+      true
+    );
   }
 }
 

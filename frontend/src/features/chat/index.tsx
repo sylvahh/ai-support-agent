@@ -21,18 +21,23 @@ export function Chat({ onClose }: ChatProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<ConversationStatus>("open");
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isReopening, setIsReopening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warningShown, setWarningShown] = useState(false);
   const lastMessageCountRef = useRef(0);
 
-  // Load session from localStorage on mount
+  // Load session from sessionStorage on mount
   useEffect(() => {
-    const storedSessionId = localStorage.getItem(variables.STORAGE_KEYS.sessionId);
-    if (storedSessionId) {
-      setSessionId(storedSessionId);
-      loadHistory(storedSessionId);
-    }
+    const init = async () => {
+      const storedSessionId = sessionStorage.getItem(variables.STORAGE_KEYS.sessionId);
+      if (storedSessionId) {
+        setSessionId(storedSessionId);
+        await loadHistory(storedSessionId);
+      }
+      setIsInitialLoading(false);
+    };
+    init();
   }, []);
 
   // Poll for conversation status and new messages when session exists
@@ -97,9 +102,18 @@ export function Chat({ onClose }: ChatProps) {
 
         // Mark messages as read
         await markAllRead({ sessionId: sid });
+      } else {
+        // Conversation doesn't exist anymore - clear stale session
+        console.log("Conversation not found, clearing stale session");
+        sessionStorage.removeItem(variables.STORAGE_KEYS.sessionId);
+        setSessionId(null);
+        setMessages([]);
       }
     } catch (err) {
       console.error("Error loading history:", err);
+      // Clear stale session on error
+      sessionStorage.removeItem(variables.STORAGE_KEYS.sessionId);
+      setSessionId(null);
     }
   };
 
@@ -142,7 +156,7 @@ export function Chat({ onClose }: ChatProps) {
           // Save session ID
           if (!sessionId) {
             setSessionId(response.sessionId);
-            localStorage.setItem(
+            sessionStorage.setItem(
               variables.STORAGE_KEYS.sessionId,
               response.sessionId
             );
@@ -212,6 +226,21 @@ export function Chat({ onClose }: ChatProps) {
       setIsReopening(false);
     }
   };
+
+  // Show loading state while initializing
+  if (isInitialLoading) {
+    return (
+      <div className="flex flex-col h-[480px] w-[360px] bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
+        <ChatHeader status={status} onClose={onClose} />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm text-gray-500">Loading chat...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[480px] w-[360px] bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import * as documentService from '../services/document.service';
+import { ServiceError } from '../services/document.service';
 import { getIndexStats } from '../services/pinecone.service';
 
 // Upload a document
@@ -35,6 +36,15 @@ export async function uploadDocument(req: Request, res: Response) {
     return res.status(201).json(result);
   } catch (error) {
     console.error('Upload document error:', error);
+
+    if (error instanceof ServiceError) {
+      return res.status(503).json({
+        success: false,
+        error: error.userMessage,
+        retryable: error.isRetryable,
+      });
+    }
+
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to upload document',

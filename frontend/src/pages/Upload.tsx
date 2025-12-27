@@ -11,7 +11,10 @@ export default function UploadPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRetryable, setIsRetryable] = useState(false);
+  const [lastFile, setLastFile] = useState<File | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchDocuments = useCallback(async () => {
     try {
@@ -58,6 +61,8 @@ export default function UploadPage() {
 
   const handleUpload = async (file: File) => {
     setError(null);
+    setIsRetryable(false);
+    setLastFile(file);
     setSuccess(null);
     setIsUploading(true);
 
@@ -65,14 +70,23 @@ export default function UploadPage() {
       const result = await uploadDocument(file);
       if (result.success) {
         setSuccess(`"${file.name}" uploaded successfully with ${result.document?.totalChunks} chunks`);
+        setLastFile(null);
         await fetchDocuments();
       } else {
         setError(result.error || "Upload failed");
+        setIsRetryable(result.retryable || false);
       }
     } catch (err) {
       setError(ensureError(err).message);
+      setIsRetryable(true);
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleRetry = () => {
+    if (lastFile) {
+      handleUpload(lastFile);
     }
   };
 
@@ -81,6 +95,7 @@ export default function UploadPage() {
 
     setError(null);
     setSuccess(null);
+    setDeletingId(id);
 
     try {
       const result = await deleteDocument(id);
@@ -92,6 +107,8 @@ export default function UploadPage() {
       }
     } catch (err) {
       setError(ensureError(err).message);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -125,9 +142,20 @@ export default function UploadPage() {
 
         {/* Status Messages */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-            <span>{error}</span>
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between text-red-700">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+            {isRetryable && lastFile && (
+              <button
+                onClick={handleRetry}
+                disabled={isUploading}
+                className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
 
@@ -224,10 +252,15 @@ export default function UploadPage() {
 
                   <button
                     onClick={() => handleDelete(doc.id, doc.filename)}
-                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                    disabled={deletingId === doc.id}
+                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Delete document"
                   >
-                    <Trash2 className="w-5 h-5" />
+                    {deletingId === doc.id ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-5 h-5" />
+                    )}
                   </button>
                 </li>
               ))}
