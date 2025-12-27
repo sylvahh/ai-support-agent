@@ -6,6 +6,7 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import chatRoutes from './routes/chat.routes';
+import documentRoutes from './routes/document.routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { startConversationCloserJob } from './jobs/conversation-closer';
 import prisma from './config/database';
@@ -31,6 +32,7 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/chat', chatRoutes);
+app.use('/documents', documentRoutes);
 
 // Error handling
 app.use(notFoundHandler);
@@ -67,6 +69,23 @@ process.on('SIGTERM', async () => {
   console.log('Shutting down gracefully...');
   await prisma.$disconnect();
   process.exit(0);
+});
+
+// Global error handlers - prevent crashes
+process.on('uncaughtException', (error: Error) => {
+  console.error('=== UNCAUGHT EXCEPTION ===');
+  console.error('Error:', error.message);
+  console.error('Stack:', error.stack);
+  console.error('Server will continue running...');
+  // Don't exit - keep the server alive
+});
+
+process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
+  console.error('=== UNHANDLED REJECTION ===');
+  console.error('Reason:', reason);
+  console.error('Promise:', promise);
+  console.error('Server will continue running...');
+  // Don't exit - keep the server alive
 });
 
 startServer();

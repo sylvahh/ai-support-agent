@@ -1,15 +1,9 @@
 import cron from 'node-cron';
-import prisma from '../config/database';
+import { conversationRepository, messageRepository } from '../repositories';
 import * as chatService from '../services/chat.service';
 
 const INACTIVITY_WARNING_MS = parseInt(process.env.INACTIVITY_WARNING_MS || '120000');
 const INACTIVITY_CLOSE_MS = parseInt(process.env.INACTIVITY_CLOSE_MS || '60000');
-
-interface ConversationToProcess {
-  id: string;
-  lastAiMessageReadAt: Date;
-  hasReceivedWarning: boolean;
-}
 
 // Track which conversations have received warnings (in-memory for simplicity)
 const warningsSent = new Map<string, Date>();
@@ -17,21 +11,7 @@ const warningsSent = new Map<string, Date>();
 async function processInactiveConversations() {
   try {
     // Find all open conversations with read AI messages
-    const openConversations = await prisma.conversation.findMany({
-      where: {
-        status: 'open',
-      },
-      include: {
-        messages: {
-          where: {
-            sender: 'ai',
-            isRead: true,
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
-      },
-    });
+    const openConversations = await conversationRepository.findOpenConversationsWithReadAiMessages();
 
     const now = Date.now();
 
@@ -47,15 +27,10 @@ async function processInactiveConversations() {
       const timeSinceRead = now - readAt;
 
       // Check if user has sent a message after the AI message was read
-      const userMessageAfterAi = await prisma.message.findFirst({
-        where: {
-          conversationId: conversation.id,
-          sender: 'user',
-          createdAt: {
-            gt: lastAiMessage.createdAt,
-          },
-        },
-      });
+      const userMessageAfterAi = await messageRepository.findUserMessageAfterDate(
+        conversation.id,
+        lastAiMessage.createdAt
+      );
 
       // If user replied, clear any warning and skip
       if (userMessageAfterAi) {

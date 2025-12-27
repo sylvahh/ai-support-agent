@@ -1,4 +1,5 @@
-import prisma from '../config/database';
+import { conversationRepository, messageRepository } from '../repositories';
+import type { MessageWithAttachments } from '../repositories';
 import { generateReply, generateConversationSummary } from './llm.service';
 import { uploadFile, UploadResult } from './upload.service';
 import {
@@ -7,28 +8,7 @@ import {
   CONVERSATION_REOPENED_MESSAGE,
 } from '../prompts/system-prompt';
 
-// Define local type since Prisma client needs to be generated
 type ConversationStatus = 'open' | 'closed';
-
-interface MessageWithAttachments {
-  id: string;
-  conversationId: string;
-  sender: string;
-  text: string;
-  isRead: boolean;
-  readAt: Date | null;
-  createdAt: Date;
-  attachments: {
-    id: string;
-    messageId: string;
-    fileName: string;
-    fileType: string;
-    fileUrl: string;
-    cloudinaryPublicId: string | null;
-    fileSize: number | null;
-    createdAt: Date;
-  }[];
-}
 
 interface SendMessageInput {
   message: string;
@@ -63,28 +43,12 @@ interface ConversationStatusResult {
 // Get or create a conversation
 async function getOrCreateConversation(sessionId?: string) {
   if (sessionId) {
-    const existing = await prisma.conversation.findUnique({
-      where: { id: sessionId },
-    });
-
+    const existing = await conversationRepository.findById(sessionId);
     if (existing) {
       return existing;
     }
   }
-
-  // Create new conversation
-  return prisma.conversation.create({
-    data: {},
-  });
-}
-
-// Get conversation history
-async function getConversationHistory(conversationId: string) {
-  return prisma.message.findMany({
-    where: { conversationId },
-    orderBy: { createdAt: 'asc' },
-    include: { attachments: true },
-  });
+  return conversationRepository.create();
 }
 
 // Send a message and get AI response
@@ -111,30 +75,25 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     }
 
     // Create user message
-    const userMessage = await prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        sender: 'user',
-        text: message,
-        isRead: true, // User messages are considered read
-        readAt: new Date(),
-        attachments: uploadResult
-          ? {
-              create: {
-                fileName: uploadResult.fileName,
-                fileType: uploadResult.fileType,
-                fileUrl: uploadResult.url,
-                cloudinaryPublicId: uploadResult.publicId,
-                fileSize: uploadResult.fileSize,
-              },
-            }
-          : undefined,
-      },
-      include: { attachments: true },
+    const userMessage = await messageRepository.createWithAttachment({
+      conversationId: conversation.id,
+      sender: 'user',
+      text: message,
+      isRead: true,
+      readAt: new Date(),
+      attachment: uploadResult
+        ? {
+            fileName: uploadResult.fileName,
+            fileType: uploadResult.fileType,
+            fileUrl: uploadResult.url,
+            cloudinaryPublicId: uploadResult.publicId,
+            fileSize: uploadResult.fileSize,
+          }
+        : undefined,
     });
 
     // Get conversation history for context
-    const history = await getConversationHistory(conversation.id);
+    const history = await messageRepository.findByConversationId(conversation.id);
     const historyForLLM = history.slice(0, -1).map((msg: MessageWithAttachments) => ({
       sender: msg.sender as 'user' | 'ai',
       text: msg.text,
@@ -158,20 +117,15 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     }
 
     // Create AI message
-    await prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        sender: 'ai',
-        text: llmResponse.reply,
-        isRead: false, // AI messages start as unread
-      },
+    await messageRepository.create({
+      conversationId: conversation.id,
+      sender: 'ai',
+      text: llmResponse.reply,
+      isRead: false,
     });
 
     // Update conversation last activity
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { lastActivityAt: new Date() },
-    });
+    await conversationRepository.updateLastActivity(conversation.id);
 
     return {
       success: true,
@@ -196,15 +150,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
 
 // Get conversation history for a session
 export async function getHistory(sessionId: string) {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: sessionId },
-    include: {
-      messages: {
-        orderBy: { createdAt: 'asc' },
-        include: { attachments: true },
-      },
-    },
-  });
+  const conversation = await conversationRepository.findByIdWithMessages(sessionId);
 
   if (!conversation) {
     return null;
@@ -220,7 +166,7 @@ export async function getHistory(sessionId: string) {
       text: msg.text,
       isRead: msg.isRead,
       createdAt: msg.createdAt,
-      attachments: msg.attachments.map((att: MessageWithAttachments['attachments'][0]) => ({
+      attachments: msg.attachments.map((att) => ({
         id: att.id,
         fileName: att.fileName,
         fileType: att.fileType,
@@ -232,9 +178,7 @@ export async function getHistory(sessionId: string) {
 
 // Mark a message as read
 export async function markMessageAsRead(messageId: string) {
-  const message = await prisma.message.findUnique({
-    where: { id: messageId },
-  });
+  const message = await messageRepository.findById(messageId);
 
   if (!message) {
     return { success: false, error: 'Message not found' };
@@ -244,31 +188,13 @@ export async function markMessageAsRead(messageId: string) {
     return { success: true, alreadyRead: true };
   }
 
-  await prisma.message.update({
-    where: { id: messageId },
-    data: {
-      isRead: true,
-      readAt: new Date(),
-    },
-  });
-
+  await messageRepository.markAsRead(messageId);
   return { success: true, alreadyRead: false };
 }
 
 // Mark all AI messages in a conversation as read
 export async function markAllAiMessagesAsRead(sessionId: string) {
-  await prisma.message.updateMany({
-    where: {
-      conversationId: sessionId,
-      sender: 'ai',
-      isRead: false,
-    },
-    data: {
-      isRead: true,
-      readAt: new Date(),
-    },
-  });
-
+  await messageRepository.markAllAiMessagesAsRead(sessionId);
   return { success: true };
 }
 
@@ -276,16 +202,7 @@ export async function markAllAiMessagesAsRead(sessionId: string) {
 export async function getConversationStatus(
   sessionId: string
 ): Promise<ConversationStatusResult | null> {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: sessionId },
-    include: {
-      messages: {
-        where: { sender: 'ai' },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      },
-    },
-  });
+  const conversation = await conversationRepository.findByIdWithLastAiMessage(sessionId);
 
   if (!conversation) {
     return null;
@@ -298,7 +215,7 @@ export async function getConversationStatus(
   // If no AI message or conversation is closed, return basic status
   if (!lastAiMessage || conversation.status === 'closed') {
     return {
-      status: conversation.status,
+      status: conversation.status as ConversationStatus,
       warningIssued: false,
     };
   }
@@ -306,7 +223,7 @@ export async function getConversationStatus(
   // If last AI message hasn't been read, no countdown
   if (!lastAiMessage.isRead || !lastAiMessage.readAt) {
     return {
-      status: conversation.status,
+      status: conversation.status as ConversationStatus,
       warningIssued: false,
     };
   }
@@ -324,7 +241,7 @@ export async function getConversationStatus(
   const warningIssued = timeSinceRead >= inactivityWarningMs;
 
   return {
-    status: conversation.status,
+    status: conversation.status as ConversationStatus,
     warningIssued,
     timeUntilWarning,
     timeUntilClose,
@@ -334,22 +251,14 @@ export async function getConversationStatus(
 
 // Close a conversation
 export async function closeConversation(sessionId: string) {
-  const conversation = await prisma.conversation.update({
-    where: { id: sessionId },
-    data: {
-      status: 'closed',
-      closedAt: new Date(),
-    },
-  });
+  const conversation = await conversationRepository.updateStatus(sessionId, 'closed', new Date());
 
   // Add system message about closure
-  await prisma.message.create({
-    data: {
-      conversationId: sessionId,
-      sender: 'ai',
-      text: CONVERSATION_CLOSED_MESSAGE,
-      isRead: false,
-    },
+  await messageRepository.create({
+    conversationId: sessionId,
+    sender: 'ai',
+    text: CONVERSATION_CLOSED_MESSAGE,
+    isRead: false,
   });
 
   return conversation;
@@ -357,13 +266,11 @@ export async function closeConversation(sessionId: string) {
 
 // Send warning message
 export async function sendWarningMessage(sessionId: string) {
-  await prisma.message.create({
-    data: {
-      conversationId: sessionId,
-      sender: 'ai',
-      text: CONVERSATION_WARNING_MESSAGE,
-      isRead: false,
-    },
+  await messageRepository.create({
+    conversationId: sessionId,
+    sender: 'ai',
+    text: CONVERSATION_WARNING_MESSAGE,
+    isRead: false,
   });
 
   return { success: true };
@@ -371,14 +278,7 @@ export async function sendWarningMessage(sessionId: string) {
 
 // Reopen a conversation
 export async function reopenConversation(sessionId: string) {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: sessionId },
-    include: {
-      messages: {
-        orderBy: { createdAt: 'asc' },
-      },
-    },
-  });
+  const conversation = await conversationRepository.findByIdWithMessages(sessionId);
 
   if (!conversation) {
     return { success: false, error: 'Conversation not found' };
@@ -389,14 +289,9 @@ export async function reopenConversation(sessionId: string) {
   }
 
   // Generate summary of previous conversation
-  interface SimpleMessage {
-    id: string;
-    text: string;
-    sender: string;
-  }
   const historyForSummary = conversation.messages
-    .filter((msg: SimpleMessage) => !msg.text.includes('closed due to inactivity'))
-    .map((msg: SimpleMessage) => ({
+    .filter((msg: MessageWithAttachments) => !msg.text.includes('closed due to inactivity'))
+    .map((msg: MessageWithAttachments) => ({
       sender: msg.sender as 'user' | 'ai',
       text: msg.text,
     }));
@@ -407,23 +302,14 @@ export async function reopenConversation(sessionId: string) {
     : 'Unable to generate summary of previous conversation.';
 
   // Reopen conversation
-  await prisma.conversation.update({
-    where: { id: sessionId },
-    data: {
-      status: 'open',
-      closedAt: null,
-      lastActivityAt: new Date(),
-    },
-  });
+  await conversationRepository.updateStatus(sessionId, 'open', null);
 
   // Add reopened message with summary
-  const reopenMessage = await prisma.message.create({
-    data: {
-      conversationId: sessionId,
-      sender: 'ai',
-      text: CONVERSATION_REOPENED_MESSAGE(summary || ''),
-      isRead: false,
-    },
+  const reopenMessage = await messageRepository.create({
+    conversationId: sessionId,
+    sender: 'ai',
+    text: CONVERSATION_REOPENED_MESSAGE(summary || ''),
+    isRead: false,
   });
 
   return {

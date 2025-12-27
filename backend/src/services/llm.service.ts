@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk';
 import { SYSTEM_PROMPT, SUMMARY_PROMPT } from '../prompts/system-prompt';
+import { queryKnowledgeBase, buildRAGSystemPrompt } from './rag.service';
 
 interface MessageHistory {
   sender: 'user' | 'ai';
@@ -15,6 +16,7 @@ interface LLMResponse {
   success: boolean;
   reply?: string;
   error?: string;
+  usedRAG?: boolean;
 }
 
 const groq = new Groq({
@@ -27,9 +29,27 @@ export async function generateReply(
   attachment?: Attachment
 ): Promise<LLMResponse> {
   try {
+    // Query knowledge base for relevant context
+    const ragContext = await queryKnowledgeBase(userMessage);
+
+    // Determine which system prompt to use
+    let systemPrompt: string;
+    let usedRAG = false;
+
+    if (ragContext.hasKnowledgeBase && ragContext.context) {
+      // Use RAG system prompt with knowledge base context
+      systemPrompt = buildRAGSystemPrompt(ragContext.context);
+      usedRAG = true;
+      console.log(`Using RAG with ${ragContext.sources.length} sources`);
+    } else {
+      // Fallback to hardcoded ShopEase system prompt
+      systemPrompt = SYSTEM_PROMPT;
+      console.log('Using hardcoded system prompt (no documents in knowledge base)');
+    }
+
     // Build conversation history for context
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
     ];
 
     // Add conversation history (limit to last 20 messages for context window)
@@ -72,6 +92,7 @@ export async function generateReply(
     return {
       success: true,
       reply: text,
+      usedRAG,
     };
   } catch (error: unknown) {
     console.error('LLM Service Error:', error);
@@ -113,7 +134,7 @@ export async function generateConversationSummary(
 ): Promise<LLMResponse> {
   try {
     const conversationText = history
-      .map((msg) => `${msg.sender === 'user' ? 'Customer' : 'Support'}: ${msg.text}`)
+      .map((msg) => `${msg.sender === 'user' ? 'Customer' : 'Ava'}: ${msg.text}`)
       .join('\n');
 
     const completion = await groq.chat.completions.create({

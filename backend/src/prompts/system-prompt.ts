@@ -91,7 +91,7 @@ export const CONVERSATION_CLOSED_MESSAGE = `This conversation has been closed du
 export const CONVERSATION_WARNING_MESSAGE = `Are you still there? This chat will automatically close in 1 minute if there's no response. Feel free to send a message if you need more help!`;
 
 export const CONVERSATION_REOPENED_MESSAGE = (summary: string) =>
-  `Welcome back! Here's a quick summary of our previous conversation:\n\n${summary}\n\nHow can I continue to help you?`;
+  `Welcome back! Here's a quick recap:\n\n${summary}\n\nHow can I help you today?`;
 
 export const SUMMARY_PROMPT = `Summarize the following customer support conversation in 2-3 sentences.
 IMPORTANT: Write the summary in SECOND PERSON, addressing the customer directly as "you" (not "the customer" or "they").
